@@ -1,0 +1,41 @@
+FROM php:8.3-fpm
+
+# Install dependencies and PHP extensions
+RUN apt-get update && apt-get install -y \
+    libsqlite3-dev \
+    libzip-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    zip \
+    unzip \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo pdo_sqlite zip gd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Set working directory
+WORKDIR /var/www/html
+
+# Copy composer files first for better caching
+COPY composer.json composer.lock* ./
+
+# Install PHP dependencies
+RUN composer install --no-dev --optimize-autoloader --no-interaction || true
+
+# Copy application files
+COPY . .
+
+# Run composer install again in case composer.json was updated
+RUN composer install --no-dev --optimize-autoloader --no-interaction || true
+
+# Create data directory
+RUN mkdir -p /var/www/html/data && \
+    chown -R www-data:www-data /var/www/html/data
+
+# Expose PHP-FPM port
+EXPOSE 9000
+
+CMD ["php-fpm"]

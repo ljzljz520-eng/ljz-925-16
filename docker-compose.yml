@@ -1,0 +1,15 @@
+services:
+  # 统一的前后端容器（端口3009）
+  unified-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.unified
+    container_name: card-code-unified
+    ports:
+      - "3009:3009"
+    volumes:
+      - ./data:/app/backend/data
+    environment:
+      - DB_PATH=/app/backend/data/app.db
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

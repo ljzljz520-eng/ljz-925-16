@@ -1,0 +1,28 @@
+{
+  "name": "card-code-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for card-code admin system",
+  "scripts": {
+    "check:frontend-protection": "node scripts/check-frontend-protection.mjs",
+    "protect:frontend": "node scripts/protect-frontend.mjs",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report test-results/html",
+    "test:login": "playwright test admin-login",
+    "test:dashboard": "playwright test admin-dashboard",
+    "test:keys": "playwright test admin-keys",
+    "test:logs": "playwright test admin-logs"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "testing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}

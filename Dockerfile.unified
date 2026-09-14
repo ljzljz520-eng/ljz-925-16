@@ -1,0 +1,72 @@
+FROM node:20-bookworm-slim AS frontend-protector
+
+WORKDIR /workspace
+
+COPY scripts/ /workspace/scripts/
+COPY php-frontend/ /workspace/php-frontend/
+COPY php-admin/ /workspace/php-admin/
+
+RUN node scripts/protect-frontend.mjs
+
+FROM php:8.3-fpm
+
+# 安装必要的系统包
+RUN apt-get update && apt-get install -y \
+    nginx \
+    supervisor \
+    curl \
+    libsqlite3-dev \
+    libzip-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo pdo_sqlite zip gd \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制后端代码
+COPY backend/ /app/backend/
+
+# 安装后端依赖
+RUN cd /app/backend && composer install --no-dev --optimize-autoloader
+
+# 复制前端代码
+COPY --from=frontend-protector /workspace/php-frontend/public/ /var/www/html/
+COPY --from=frontend-protector /workspace/php-frontend/includes/ /var/www/includes/
+COPY --from=frontend-protector /workspace/php-frontend/assets/ /var/www/html/assets/
+
+# 复制PHP Admin代码
+COPY --from=frontend-protector /workspace/php-admin/public/ /var/www/html/admin/
+COPY --from=frontend-protector /workspace/php-admin/includes/ /var/www/admin-includes/
+COPY --from=frontend-protector /workspace/php-admin/assets/ /var/www/html/assets/
+
+# 清理默认文件
+RUN rm -f /var/www/html/index.nginx-debian.html
+
+# 配置Nginx
+COPY docker/nginx-unified.conf /etc/nginx/sites-available/default
+
+# 配置PHP-FPM
+RUN sed -i 's/listen = 127.0.0.1:9000/listen = 9000/' /usr/local/etc/php-fpm.d/www.conf
+
+# 配置Supervisor
+COPY docker/supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
+
+# 设置权限
+RUN chown -R www-data:www-data /var/www/html /var/www/includes /var/www/admin-includes /app/backend \
+    && chmod -R 755 /var/www/html /var/www/includes /var/www/admin-includes /app/backend
+
+# 创建日志目录
+RUN mkdir -p /var/log/supervisor /var/log/nginx /var/log/php-fpm
+
+# 暴露端口
+EXPOSE 3009
+
+# 启动Supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

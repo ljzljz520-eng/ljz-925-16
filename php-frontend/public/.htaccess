@@ -1,0 +1,14 @@
+RewriteEngine On
+
+# Handle admin API requests
+RewriteRule ^api/admin/(.*)$ /admin/api.php [QSA,L]
+
+# Handle API requests
+RewriteRule ^api/(.*)$ /api.php [QSA,L]
+
+# Redirect all requests to index.php except for existing files
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !^/assets/
+RewriteCond %{REQUEST_URI} !^/admin
+RewriteRule ^(.*)$ /index.php [QSA,L]
