@@ -65,6 +65,9 @@ RUN chown -R www-data:www-data /var/www/html /var/www/includes /var/www/admin-in
 # 创建日志目录
 RUN mkdir -p /var/log/supervisor /var/log/nginx /var/log/php-fpm
 
+# 设置时区为 Asia/Shanghai（保证PHP与SQLite localtime时间一致）
+ENV TZ=Asia/Shanghai
+
 # 暴露端口
 EXPOSE 3009
 

@@ -35,6 +35,9 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction || true
 RUN mkdir -p /var/www/html/data && \
     chown -R www-data:www-data /var/www/html/data
 
+# 设置时区为 Asia/Shanghai（保证PHP与SQLite localtime时间一致）
+ENV TZ=Asia/Shanghai
+
 # Expose PHP-FPM port
 EXPOSE 9000
 

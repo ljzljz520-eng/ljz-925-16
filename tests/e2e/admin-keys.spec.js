@@ -40,6 +40,7 @@ test.describe('Admin Keys Management', () => {
 
     // Check action buttons
     await expect(page.locator('#generateBtn')).toBeVisible();
+    await expect(page.locator('#scanExpiredBtn')).toBeVisible();
     await expect(page.locator('#exportBtn')).toBeVisible();
     await expect(page.locator('#updateExpireBtn')).toBeVisible();
     await expect(page.locator('#batchBanBtn')).toBeVisible();
@@ -50,6 +51,7 @@ test.describe('Admin Keys Management', () => {
     await expect(page.locator('.filter-btn[data-status=""]')).toBeVisible();
     await expect(page.locator('.filter-btn[data-status="active"]')).toBeVisible();
     await expect(page.locator('.filter-btn[data-status="banned"]')).toBeVisible();
+    await expect(page.locator('.filter-btn[data-status="expired"]')).toBeVisible();
     await expect(page.locator('.filter-btn[data-status="deleted"]')).toBeVisible();
 
     // Check table
@@ -244,5 +246,29 @@ test.describe('Admin Keys Management', () => {
       await expect(page.locator('.pagination-btn')).toHaveCount(2);
       await expect(page.locator('.pagination-info')).toBeVisible();
     }
+  });
+
+  test('should scan and process expired keys', async ({ page }) => {
+    // Wait for page to load
+    await page.waitForTimeout(1000);
+
+    // Click scan expired button
+    await page.click('#scanExpiredBtn');
+
+    // Confirm in modal
+    await page.waitForSelector('.modal-container:not(.hidden)', { timeout: 10000 });
+    await expect(page.locator('.modal-title')).toContainText('扫描过期卡密');
+    await page.click('.modal-ok');
+
+    // Should show scan result toast
+    await expect(page.locator('#toastContainer')).toContainText('扫描完成', { timeout: 10000 });
+
+    // Switch to expired filter, expired keys should be listed with 已过期 badge
+    await page.click('.filter-btn[data-status="expired"]');
+    await page.waitForTimeout(2000);
+
+    const expiredBadges = page.locator('#keysTableBody .badge-warning');
+    await expect(expiredBadges.first()).toBeVisible({ timeout: 10000 });
+    await expect(expiredBadges.first()).toContainText('已过期');
   });
 });

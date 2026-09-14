@@ -252,6 +252,18 @@ elseif ($path === 'api/admin/keys/update-expire' && $method === 'POST') {
     Response::jsonSuccess(['affected' => $affected], "成功修改{$affected}个卡密的有效期");
 }
 
+// POST /api/admin/keys/scan-expired - 手动扫描并批量处理过期卡密
+elseif ($path === 'api/admin/keys/scan-expired' && $method === 'POST') {
+    $adminId = requireAdminAuth();
+
+    $affected = KeyManager::checkExpiredKeys();
+
+    // 记录管理员操作日志
+    Logger::logAdminOp($adminId, 'scan_expired', "手动扫描过期卡密，共处理{$affected}个");
+
+    Response::jsonSuccess(['affected' => $affected], "扫描完成，共处理{$affected}个过期卡密");
+}
+
 // GET /api/admin/keys/export - 导出卡密
 elseif ($path === 'api/admin/keys/export' && $method === 'GET') {
     $adminId = requireAdminAuth();

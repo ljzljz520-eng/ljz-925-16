@@ -114,7 +114,8 @@ abstract class TestCase extends BaseTestCase
         // 创建卡密
         $keyHash = \App\Auth::hashKey($keyPlain);
         $keyEncrypted = \App\Crypto::encrypt($keyPlain);
-        $expireAt = date('Y-m-d H:i:s', strtotime("+{$expireDays} days"));
+        // 注意：直接拼接天数，支持负数（表示已过期）
+        $expireAt = date('Y-m-d H:i:s', strtotime("{$expireDays} days"));
 
         Database::execute(
             "INSERT INTO license_key (batch_id, key_hash, key_encrypted, status, expire_at, created_at)

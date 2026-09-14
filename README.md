@@ -535,6 +535,7 @@ CREATE INDEX idx_problem_type ON templates(problem_type_id);
   - 1002: 登录已过期，请重新验证
   - 1003: 卡密已被封禁或删除
   - 1004: 尝试次数过多，请稍后再试
+  - 1005: 卡密已过期（到期自动失效，`data.reason` 返回退出原因）
 - **2xxx**: 业务相关错误
   - 2001: 生成失败，请重试
   - 2002: 参数错误
@@ -579,9 +580,21 @@ CREATE INDEX idx_problem_type ON templates(problem_type_id);
 }
 ```
 
+卡密已过有效期时，后端会将卡密状态自动更新为 `expired`（到期自动失效），并返回退出原因：
+
+```json
+{
+	"code": 1005,
+	"message": "卡密已过期",
+	"data": {
+		"reason": "expired"
+	}
+}
+```
+
 #### GET /api/auth/ping
 
-心跳检测，验证Token和卡密状态
+心跳检测，验证Token和卡密状态。若卡密已到期，后端会将卡密状态更新为 `expired`、撤销其Token，并返回退出原因（`code=1005`，`data.reason=expired`），前端据此提示并退出到卡密输入页。
 
 **请求头：**
 

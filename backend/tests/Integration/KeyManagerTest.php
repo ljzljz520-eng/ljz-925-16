@@ -176,6 +176,96 @@ class KeyManagerTest extends TestCase
     }
 
     /**
+     * 测试修改有效期后，已过期卡密恢复可用
+     */
+    public function testUpdateExpireReactivatesExpiredKeys(): void
+    {
+        $adminId = $this->createTestAdmin();
+
+        // 创建已过期且状态为expired的卡密
+        $keyData = $this->createTestKey('EXP000000010', 'expired', -1);
+
+        // 修改有效期为30天
+        $affected = KeyManager::updateExpire([$keyData['id']], 30, $adminId);
+        $this->assertEquals(1, $affected);
+
+        // 状态应恢复为active，且过期时间在未来
+        $keyInfo = Database::queryOne(
+            'SELECT status, expire_at FROM license_key WHERE id = ?',
+            [$keyData['id']]
+        );
+        $this->assertEquals('active', $keyInfo['status']);
+        $this->assertGreaterThan(time(), strtotime($keyInfo['expire_at']));
+    }
+
+    /**
+     * 测试扫描处理过期卡密
+     */
+    public function testCheckExpiredKeys(): void
+    {
+        // 准备数据：2个已过期的active卡密、1个未过期的active卡密、1个已封禁卡密
+        $expired1 = $this->createTestKey('SCAN00000001', 'active', -1);
+        $expired2 = $this->createTestKey('SCAN00000002', 'active', -3);
+        $valid = $this->createTestKey('SCAN00000003', 'active', 30);
+        $banned = $this->createTestKey('SCAN00000004', 'banned', -1);
+
+        // 为过期卡密创建token，验证扫描后token被撤销
+        $tokenData = \App\TokenManager::generateToken($expired1['id']);
+
+        // 执行扫描
+        $affected = KeyManager::checkExpiredKeys();
+        $this->assertEquals(2, $affected);
+
+        // 过期卡密状态应更新为expired
+        foreach ([$expired1, $expired2] as $keyData) {
+            $keyInfo = Database::queryOne('SELECT status FROM license_key WHERE id = ?', [$keyData['id']]);
+            $this->assertEquals('expired', $keyInfo['status']);
+        }
+
+        // 未过期卡密不受影响
+        $keyInfo = Database::queryOne('SELECT status FROM license_key WHERE id = ?', [$valid['id']]);
+        $this->assertEquals('active', $keyInfo['status']);
+
+        // 已封禁卡密不受影响
+        $keyInfo = Database::queryOne('SELECT status FROM license_key WHERE id = ?', [$banned['id']]);
+        $this->assertEquals('banned', $keyInfo['status']);
+
+        // 过期卡密的token应被撤销
+        $this->assertNull(\App\TokenManager::getTokenKeyInfo($tokenData['token']));
+
+        // 再次扫描，没有可处理的卡密
+        $this->assertEquals(0, KeyManager::checkExpiredKeys());
+    }
+
+    /**
+     * 测试将单个卡密标记为过期
+     */
+    public function testMarkKeyExpired(): void
+    {
+        $keyData = $this->createTestKey('MARK00000001', 'active', -1);
+        $tokenData = \App\TokenManager::generateToken($keyData['id']);
+
+        $result = KeyManager::markKeyExpired($keyData['id']);
+        $this->assertTrue($result);
+
+        // 状态更新为expired
+        $keyInfo = Database::queryOne('SELECT status FROM license_key WHERE id = ?', [$keyData['id']]);
+        $this->assertEquals('expired', $keyInfo['status']);
+
+        // token被撤销
+        $this->assertNull(\App\TokenManager::getTokenKeyInfo($tokenData['token']));
+
+        // 重复标记返回false（状态已不是active）
+        $this->assertFalse(KeyManager::markKeyExpired($keyData['id']));
+
+        // 已封禁卡密不会被标记为过期
+        $bannedKey = $this->createTestKey('MARK00000002', 'banned', -1);
+        $this->assertFalse(KeyManager::markKeyExpired($bannedKey['id']));
+        $keyInfo = Database::queryOne('SELECT status FROM license_key WHERE id = ?', [$bannedKey['id']]);
+        $this->assertEquals('banned', $keyInfo['status']);
+    }
+
+    /**
      * 测试获取卡密统计
      */
     public function testGetKeyStats(): void

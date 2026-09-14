@@ -4,8 +4,9 @@
  * PHPUnit 测试引导文件
  */
 
-// 设置时区
+// 设置时区（同时设置TZ环境变量，保证SQLite localtime与PHP时间一致）
 date_default_timezone_set('Asia/Shanghai');
+putenv('TZ=Asia/Shanghai');
 
 // 设置错误报告
 error_reporting(E_ALL);

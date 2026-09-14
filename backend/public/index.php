@@ -9,8 +9,9 @@
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
-// 设置时区
+// 设置时区（同时设置PHP时区与SQLite localtime依赖的TZ环境变量，保证时间比较一致）
 date_default_timezone_set('Asia/Shanghai');
+putenv('TZ=Asia/Shanghai');
 
 // 加载Composer autoload
 if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
@@ -59,6 +60,8 @@ try {
     // 定期清理过期数据（10%概率）
     if (rand(1, 10) === 1) {
         Database::cleanup();
+        // 同步处理到期卡密：标记为过期并撤销其token
+        App\KeyManager::checkExpiredKeys();
     }
 
     // 获取请求路径

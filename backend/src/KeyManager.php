@@ -198,6 +198,9 @@ class KeyManager
     /**
      * 修改卡密有效期
      *
+     * 修改后下一次校验按新的过期时间判断：
+     * 若卡密此前因到期被标记为 expired，且新有效期在未来，则自动恢复为 active。
+     *
      * @param array $keyIds 卡密ID数组
      * @param int $expireDays 有效期（天）
      * @param int $adminId 管理员ID
@@ -217,6 +220,14 @@ class KeyManager
         $affected = Database::execute(
             "UPDATE license_key SET expire_at = ? WHERE id IN ($placeholders)",
             $params
+        );
+
+        // 新有效期在未来，恢复因到期而失效的卡密，使下一次校验按新时间判断
+        Database::execute(
+            "UPDATE license_key SET status = 'active'
+             WHERE status = 'expired' AND expire_at > datetime('now', 'localtime')
+             AND id IN ($placeholders)",
+            $keyIds
         );
 
         // 记录管理员操作日志
@@ -327,19 +338,19 @@ class KeyManager
             AND expire_at > datetime('now', 'localtime')
             AND first_used_at IS NULL");
 
-        // 已使用：status='active' 且已使用过（不管是否过期）
+        // 已使用：status='active' 且已使用过且未过期
         $used = Database::queryOne("SELECT COUNT(*) as count FROM license_key
             WHERE status = 'active'
-            AND first_used_at IS NOT NULL");
+            AND first_used_at IS NOT NULL
+            AND expire_at > datetime('now', 'localtime')");
 
         // 已封禁：status='banned'
         $banned = Database::queryOne("SELECT COUNT(*) as count FROM license_key WHERE status = 'banned'");
 
-        // 已过期：status='active' 且已过期且未使用
+        // 已过期：status='expired'，或仍为 active 但有效期已过（尚未扫描处理）
         $expired = Database::queryOne("SELECT COUNT(*) as count FROM license_key
-            WHERE status = 'active'
-            AND expire_at <= datetime('now', 'localtime')
-            AND first_used_at IS NULL");
+            WHERE status = 'expired'
+            OR (status = 'active' AND expire_at <= datetime('now', 'localtime'))");
 
         $todayNew = Database::queryOne("SELECT COUNT(*) as count FROM license_key WHERE DATE(created_at) = DATE('now', 'localtime')");
         $todayUsed = Database::queryOne("SELECT COUNT(*) as count FROM license_key WHERE DATE(first_used_at) = DATE('now', 'localtime')");
@@ -356,15 +367,62 @@ class KeyManager
     }
 
     /**
-     * 检查并封禁过期卡密
+     * 将单个卡密标记为过期
      *
-     * @return int 封禁的数量
+     * 状态从 active 更新为 expired，并撤销该卡密的所有访问令牌，
+     * 使在线会话立即失效（自动退出）。
+     *
+     * @param int $keyId 卡密ID
+     * @return bool 是否更新了状态
+     */
+    public static function markKeyExpired(int $keyId): bool
+    {
+        $affected = Database::execute(
+            "UPDATE license_key SET status = 'expired' WHERE id = ? AND status = 'active'",
+            [$keyId]
+        );
+
+        // 撤销该卡密的所有token，强制已登录会话退出
+        TokenManager::revokeKeyTokens($keyId);
+
+        return $affected > 0;
+    }
+
+    /**
+     * 扫描并处理过期卡密（批量）
+     *
+     * 将所有有效期已过但仍为 active 的卡密批量更新为 expired，
+     * 并撤销这些卡密的全部访问令牌。
+     *
+     * @return int 处理的卡密数量
      */
     public static function checkExpiredKeys(): int
     {
-        // 注意：这里不改变status，只是标记为过期
-        // 实际验证时会检查expire_at字段
-        return 0;
+        // 查找所有已过期但仍为 active 的卡密
+        $expiredKeys = Database::query(
+            "SELECT id FROM license_key
+             WHERE status = 'active' AND expire_at <= datetime('now', 'localtime')"
+        );
+
+        if (empty($expiredKeys)) {
+            return 0;
+        }
+
+        $keyIds = array_map('intval', array_column($expiredKeys, 'id'));
+        $placeholders = implode(',', array_fill(0, count($keyIds), '?'));
+
+        // 批量标记为过期
+        $affected = Database::execute(
+            "UPDATE license_key SET status = 'expired' WHERE id IN ($placeholders)",
+            $keyIds
+        );
+
+        // 撤销这些卡密的所有token
+        foreach ($keyIds as $keyId) {
+            TokenManager::revokeKeyTokens($keyId);
+        }
+
+        return $affected;
     }
 
     /**
@@ -433,7 +491,8 @@ class KeyManager
         $labels = [
             'active' => '可用',
             'banned' => '封禁',
-            'deleted' => '已删除'
+            'deleted' => '已删除',
+            'expired' => '已过期'
         ];
 
         return $labels[$status] ?? $status;

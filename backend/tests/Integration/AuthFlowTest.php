@@ -61,9 +61,9 @@ class AuthFlowTest extends TestCase
     }
 
     /**
-     * 测试过期卡密自动封禁
+     * 测试过期卡密自动失效（状态更新为expired并返回退出原因）
      */
-    public function testExpiredKeyAutoBan(): void
+    public function testExpiredKeyAutoExpire(): void
     {
         // 创建已过期的卡密
         $keyData = $this->createTestKey('EXP000000001', 'active', -1);
@@ -72,16 +72,71 @@ class AuthFlowTest extends TestCase
         // 尝试验证
         $result = Auth::verifyKey($keyPlain, '127.0.0.1', 'TestAgent');
 
-        $this->assertResponseError($result, 1001);
+        $this->assertResponseError($result, 1005);
         $this->assertStringContainsString('过期', $result['message']);
 
-        // 验证卡密已被自动封禁
+        // 返回退出原因
+        $this->assertIsArray($result['data']);
+        $this->assertEquals('expired', $result['data']['reason']);
+
+        // 验证卡密状态已被更新为过期
         $keyInfo = Database::queryOne(
             'SELECT status FROM license_key WHERE id = ?',
             [$keyData['id']]
         );
 
-        $this->assertEquals('banned', $keyInfo['status']);
+        $this->assertEquals('expired', $keyInfo['status']);
+    }
+
+    /**
+     * 测试过期卡密验证后token被撤销
+     */
+    public function testExpiredKeyVerifyRevokesTokens(): void
+    {
+        // 创建有效卡密并验证获取token
+        $keyData = $this->createTestKey('EXP000000002', 'active', 30);
+        $authResult = Auth::verifyKey($keyData['key_plain'], '127.0.0.1', 'TestAgent');
+        $this->assertResponseSuccess($authResult);
+        $token = $authResult['data']['token'];
+
+        // 手动将卡密设置为过期
+        Database::execute(
+            "UPDATE license_key SET expire_at = datetime('now', '-1 days', 'localtime') WHERE id = ?",
+            [$keyData['id']]
+        );
+
+        // 再次校验，发现已过期
+        $result = Auth::verifyKey($keyData['key_plain'], '127.0.0.1', 'TestAgent');
+        $this->assertResponseError($result, 1005);
+
+        // token应被撤销，无法再使用
+        $validateResult = Auth::validateToken($token);
+        $this->assertResponseError($validateResult, 1002);
+    }
+
+    /**
+     * 测试修改有效期后，下一次校验按新时间判断
+     */
+    public function testVerifyUsesNewExpireTimeAfterUpdate(): void
+    {
+        $adminId = $this->createTestAdmin();
+
+        // 创建已过期的卡密并触发自动失效
+        $keyData = $this->createTestKey('EXP000000003', 'active', -1);
+        $result = Auth::verifyKey($keyData['key_plain'], '127.0.0.1', 'TestAgent');
+        $this->assertResponseError($result, 1005);
+
+        // 确认状态已变为expired
+        $keyInfo = Database::queryOne('SELECT status FROM license_key WHERE id = ?', [$keyData['id']]);
+        $this->assertEquals('expired', $keyInfo['status']);
+
+        // 管理员修改有效期为60天
+        \App\KeyManager::updateExpire([$keyData['id']], 60, $adminId);
+
+        // 下一次校验应按新时间判断：验证成功
+        $result2 = Auth::verifyKey($keyData['key_plain'], '127.0.0.1', 'TestAgent');
+        $this->assertResponseSuccess($result2);
+        $this->assertArrayHasKey('token', $result2['data']);
     }
 
     /**
@@ -201,20 +256,18 @@ class AuthFlowTest extends TestCase
             [$keyData['id']]
         );
 
-        // 心跳检测应该失败（返回1001或1002都可以接受）
+        // 心跳检测应该发现卡密已过期，返回1005及退出原因
         $pingResult = Auth::ping($token);
-        $this->assertResponseError($pingResult);
-        // 可能返回1001（卡密过期）或1002（token无效）
-        $this->assertContains($pingResult['code'], [1001, 1002]);
+        $this->assertResponseError($pingResult, 1005);
+        $this->assertStringContainsString('过期', $pingResult['message']);
+        $this->assertEquals('expired', $pingResult['data']['reason']);
 
-        // 如果返回1001，说明执行了过期检查，卡密应该被封禁
-        if ($pingResult['code'] === 1001) {
-            $keyInfo = Database::queryOne(
-                'SELECT status FROM license_key WHERE id = ?',
-                [$keyData['id']]
-            );
-            $this->assertEquals('banned', $keyInfo['status']);
-        }
+        // 卡密状态应被更新为过期
+        $keyInfo = Database::queryOne(
+            'SELECT status FROM license_key WHERE id = ?',
+            [$keyData['id']]
+        );
+        $this->assertEquals('expired', $keyInfo['status']);
     }
 
     /**

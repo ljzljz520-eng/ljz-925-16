@@ -93,6 +93,29 @@ class TokenManager
     }
 
     /**
+     * 查询令牌及其关联卡密信息（不做有效性过滤）
+     *
+     * 用于在token校验失败时进一步判断失效原因（如卡密已过期）。
+     *
+     * @param string $token 令牌
+     * @return array|null 返回token及卡密信息，token不存在返回null
+     */
+    public static function getTokenKeyInfo(string $token): ?array
+    {
+        $tokenHash = self::hashToken($token);
+
+        $tokenInfo = Database::queryOne(
+            "SELECT t.*, k.status as key_status, k.expire_at as key_expire_at
+             FROM access_token t
+             LEFT JOIN license_key k ON t.key_id = k.id
+             WHERE t.token_hash = ?",
+            [$tokenHash]
+        );
+
+        return $tokenInfo ?: null;
+    }
+
+    /**
      * 撤销令牌
      *
      * @param string $token 令牌

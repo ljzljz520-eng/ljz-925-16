@@ -62,15 +62,26 @@ class Auth
             return Response::error(1001, '卡密无效或已失效');
         }
 
-        // 检查过期时间
+        // 已标记过期的卡密：若有效期已被延长（管理员修改），按新时间恢复为可用
+        if ($keyInfo['status'] === 'expired') {
+            if (strtotime($keyInfo['expire_at']) >= time()) {
+                Database::execute(
+                    "UPDATE license_key SET status = 'active' WHERE id = ?",
+                    [$keyInfo['id']]
+                );
+                $keyInfo['status'] = 'active';
+            } else {
+                Logger::logKeyUsage($keyInfo['id'], 'verify', 'failed', '卡密已过期', $ip, $ua);
+                return Response::error(1005, '卡密已过期', ['reason' => 'expired']);
+            }
+        }
+
+        // 检查过期时间（按数据库中最新的有效期判断）
         if (strtotime($keyInfo['expire_at']) < time()) {
-            // 自动封禁过期卡密
-            Database::execute(
-                "UPDATE license_key SET status = 'banned' WHERE id = ?",
-                [$keyInfo['id']]
-            );
-            Logger::logKeyUsage($keyInfo['id'], 'verify', 'failed', '卡密已过期，已自动封禁', $ip, $ua);
-            return Response::error(1001, '卡密已过期');
+            // 到期自动失效：状态更新为过期，并撤销该卡密的所有token
+            KeyManager::markKeyExpired((int) $keyInfo['id']);
+            Logger::logKeyUsage($keyInfo['id'], 'verify', 'failed', '卡密已过期，已自动失效', $ip, $ua);
+            return Response::error(1005, '卡密已过期', ['reason' => 'expired']);
         }
 
         // 更新首次使用时间和最后使用时间
@@ -133,6 +144,17 @@ class Auth
         $tokenInfo = TokenManager::validateToken($token);
 
         if (!$tokenInfo) {
+            // token校验失败，进一步判断是否为卡密到期导致的失效
+            $rawInfo = TokenManager::getTokenKeyInfo($token);
+
+            if ($rawInfo && ($rawInfo['key_status'] === 'expired'
+                || ($rawInfo['key_expire_at'] !== null && strtotime($rawInfo['key_expire_at']) < time()))) {
+                // 到期自动失效：状态更新为过期，撤销token，并返回退出原因
+                KeyManager::markKeyExpired((int) $rawInfo['key_id']);
+                Logger::logKeyUsage($rawInfo['key_id'], 'ping', 'failed', '卡密已过期，已自动失效');
+                return Response::error(1005, '卡密已过期', ['reason' => 'expired']);
+            }
+
             Logger::logKeyUsage(null, 'ping', 'failed', 'Token无效或已过期');
             return Response::error(1002, '登录已过期，请重新验证');
         }
@@ -143,15 +165,12 @@ class Auth
             return Response::error(1003, '卡密已被封禁或删除');
         }
 
-        // 检查卡密是否过期
+        // 检查卡密是否过期（按数据库中最新的有效期判断）
         if (strtotime($tokenInfo['key_expire_at']) < time()) {
-            // 自动封禁过期卡密
-            Database::execute(
-                "UPDATE license_key SET status = 'banned' WHERE id = ?",
-                [$tokenInfo['key_id']]
-            );
-            Logger::logKeyUsage($tokenInfo['key_id'], 'ping', 'failed', '卡密已过期，已自动封禁');
-            return Response::error(1001, '卡密已过期');
+            // 到期自动失效：状态更新为过期，并撤销该卡密的所有token
+            KeyManager::markKeyExpired((int) $tokenInfo['key_id']);
+            Logger::logKeyUsage($tokenInfo['key_id'], 'ping', 'failed', '卡密已过期，已自动失效');
+            return Response::error(1005, '卡密已过期', ['reason' => 'expired']);
         }
 
         // 记录成功日志
